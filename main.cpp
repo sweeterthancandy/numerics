@@ -5,14 +5,16 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/preprocessor.hpp>
 
-#define PRINT_SEQ_detail(r, d, i, e) do{ std::cout << ( i ? ", " : "" ) << BOOST_PP_STRINGIZE(e) << " = \n" << (e); }while(0);
+#define PRINT_SEQ_detail(r, d, i, e) do{ std::cout << ( i ? ", " : "" ) << BOOST_PP_STRINGIZE(e) << " = " << (e); }while(0);
 #define PRINT_SEQ(SEQ) do{ BOOST_PP_SEQ_FOR_EACH_I( PRINT_SEQ_detail, ~, SEQ) std::cout << "\n"; }while(0)
 #define PRINT(X) PRINT_SEQ((X))
+#define PRINT_M(M) do{ std::cout << #M " = \n"; std::cout << M; }while(0)
 
 template<class T>
 struct basic_matrix{
+        using value_type = T;
         enum identity_e{ identity };
-        explicit basic_matrix(size_t height, size_t width):
+        explicit basic_matrix(size_t height = 2, size_t width = 1):
                 height_{height},
                 width_{width}, 
                 data_(width_ * height_ )
@@ -166,6 +168,81 @@ private:
         std::vector<T> data_;
 };
 
+
+template<class Matrix_Type>
+void LU_factorize(Matrix_Type const& a, Matrix_Type& L, Matrix_Type& U){
+        L = Matrix_Type(a.height(), a.width(), Matrix_Type::identity );
+        U = Matrix_Type(a.height(), a.width());
+
+
+        enum Op{ Op_L, Op_U};
+        std::vector<std::tuple<Op, int, int> > sch;
+        for(size_t k=0;k!=a.width();++k){
+
+                for(size_t j=k;j<a.width();++j){
+                        sch.emplace_back( Op_U, k, j);
+                }
+
+                for(size_t i=k+1;i<a.height();++i){
+                        sch.emplace_back( Op_L, i, k);
+                }
+        }
+        using std::get;
+        for( auto const& t : sch ){
+                auto i = get<1>(t);
+                auto j = get<2>(t);
+                if( get<0>(t) == Op_U ){
+                        //PRINT_SEQ(('U')(i)(j));
+                        U(i,j) = a(i,j);
+                        for(size_t k = 0; k  < i; ++k)
+                                U(i,j) -= L(i,k) * U(k,j);
+                } else{
+                        //PRINT_SEQ(('L')(i)(j));
+                        L(i,j) += a(i,j);
+                        for(size_t k = 0; k  < j; ++k)
+                                L(i,j) -= L(i,k) * U(k,j);
+                        L(i,j) /= U(j,j);
+                }
+        }
+}
+
+/*
+        A x = B , x \in R^n
+*/
+template<class Matrix_Type>
+Matrix_Type linear_solve(Matrix_Type const& A, Matrix_Type const& B){
+        using value_type = typename Matrix_Type::value_type;
+        /*
+                A x = B
+                L U x = B
+
+                L y = B
+                U x = y;
+         */
+        Matrix_Type L,U,Y(A.height()),X(A.height());
+        LU_factorize(A,L,U);
+
+
+        for(size_t i{0};i!=Y.height();++i){
+                value_type val{ B(i) };
+                for(size_t j{0};j<i;++j)
+                        val -= Y(j) * L(i,j);
+                Y(i) = val / L(i,i);
+        }
+
+        for(size_t i{X.height()};i!=0;){
+                --i;
+                value_type val{ Y(i) };
+                for(size_t j{X.height()};j!=0 && j > i;){
+                        --j;
+                        val -= X(j) * U(i, j);
+                }
+                X(i) = val / U(i,i);
+        }
+
+        return X;
+}
+
 void test0(){
         basic_matrix<long double> A(3,3);
         basic_matrix<long double> I(3,3, basic_matrix<long double>::identity );
@@ -175,7 +252,6 @@ void test0(){
         I2(0,1) = 1;
         I2(1,0) = 1;
         basic_matrix<long double> B(3,1);
-        #if 1
         A(0,0) = 1;
         A(0,1) = 1;
         A(0,2) = 1;
@@ -185,72 +261,20 @@ void test0(){
         A(2,0) = -1;
         A(2,1) = 5;
         A(2,2) = -4;
-        #endif
-        #if 0
-        A(0,0) = 1;
-        A(0,1) = 2;
-        A(0,2) = 3;
-        A(1,0) = 0;
-        A(1,1) = 4;
-        A(1,2) = 5;
-        A(2,0) = 1;
-        A(2,1) = 0;
-        A(2,2) = 6;
-        #endif
 
 
         B(0) = 6;
         B(1) = 16;
         B(2) = -3;
-        
-        std::cout << A;
-        std::cout << B;
 
-        PRINT(I);
-        PRINT(A*I);
-        PRINT(I*I*I);
-        PRINT(A.cof_matrix());
-        PRINT(A*A.cof_matrix());
-        PRINT(A.cof_matrix()*A);
-        PRINT(I2);
-        PRINT( A * I2 );
-        PRINT( I2 * A );
+        PRINT_M(A);
+        PRINT_M(B);
 
-        PRINT(A.det());
-        PRINT(A.inverse());
-        PRINT(A * A.inverse());
-        PRINT( A*B );
-
-        PRINT(A.cof(0,0));
-
-        auto x{A.inverse() * B };
-        PRINT(A*x);
+        auto x = linear_solve(A,B);
+        PRINT( A* x );
 }
 
-void test1(){
-        basic_matrix<long double> A(2,2), B(2,2);
-
-        A(0,0) = 4;
-        A(1,0) = 2;
-        A(0,1) = 7;
-        A(1,1) = 6;
-        
-        B(0,0) = .6;
-        B(1,0) = -.2;
-        B(0,1) = -.7;
-        B(1,1) = .4;
-
-        PRINT(A);
-        PRINT(A.adj());
-        PRINT(A*A.adj());
-        PRINT(A*A.inverse());
-
-        PRINT(B);
-
-        PRINT( A*B);
-}
 
 int main(){
         test0();
-        //test1();
 }
