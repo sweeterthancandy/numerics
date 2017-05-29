@@ -323,10 +323,22 @@ void test0(){
 }
 
 template<class X_t, class F_t, class J_t>
-void newton_method_solve(X_t& x, F_t const& F, J_t const& J){
+auto newton_method_solve(X_t& x0, F_t const& F, J_t const& J){
         /*
                 x_{n+1} = x_{n} - J(x_n)^-1 * F(x)
          */
+        X_t x{x0};
+        for(;;){
+                X_t next{ x - J(x).inverse() * F(x) };
+                auto d( x - next);
+                auto norm{ d.template norm<infinity>() };
+                x = next;
+                if( norm < 1e-15){
+                        break;
+                }
+        }
+        return std::move(x);
+
 }
 
 template<class X_t, class G_t>
@@ -353,19 +365,69 @@ void test1(){
         using fun_t = std::function<float_t(mat_t const&)>;
 
 
-        basic_matrix<fun_t> F(2);
-        F(0) = [](mat_t const& X)->float_t{ return std::pow( 1-std::pow(X(1),2.0), .5); };
-        F(1) = [](mat_t const& X)->float_t{ return 1.0 / std::sqrt(21.0) * std::pow(9.0 - 5.0 * std::pow(X(0),2.0), .5); };
+        basic_matrix<fun_t> G(2);
+        G(0) = [](mat_t const& X)->float_t{ return std::pow( 1-std::pow(X(1),2.0), .5); };
+        G(1) = [](mat_t const& X)->float_t{ return 1.0 / std::sqrt(21.0) * std::pow(9.0 - 5.0 * std::pow(X(0),2.0), .5); };
+        
+        basic_matrix<float_t> X0(2);
+        X0(0) = .5;
+        X0(1) = .3;
 
+        #if 0
         basic_matrix<fun_t> J(2, 2);
         J(0,0) = [](mat_t const& X)->float_t{ return 0; };
         J(1,0) = [](mat_t const& X)->float_t{ return -5/std::sqrt(12) * X(0) * std::pow(9 - 5 * std::pow(X(1),2.0), -0.5); };
         J(0,1) = [](mat_t const& X)->float_t{ return -X(1) * std::pow(1 - std::pow(X(2),2), -.5); };
         J(1,1) = [](mat_t const& X)->float_t{ return 0; };
+        #endif
+
+
+        auto X{X0};
+
+        auto make_aux = [&](auto const& M){
+                return [&](auto const& X)->mat_t{
+                        mat_t ret{ M.height(), M.width() };
+                        for(size_t i{0};i!=M.height();++i){
+                                for(size_t j{0};j!=M.width();++j){
+                                        ret(i,j) = M(i,j)(X);
+                                }
+                        }
+                        return std::move(ret);
+                };
+
+        };
+        auto G_aux{ make_aux(G) };
+        auto sret = solve_simultaneous_iteration( X, G_aux );
+        PRINT_M(sret);
+
+}
+
+
+void test2(){
+
+        using mat_t = basic_matrix<float_t>;
+        using fun_t = std::function<float_t(mat_t const&)>;
 
         basic_matrix<float_t> X0(2);
         X0(0) = .5;
         X0(1) = .3;
+
+        /*
+                
+                f_1 =   x_1^2 +    x_2 ^ 2 - 1
+                f_2 = 5 x_1^2 + 21 x_2 ^ 2 - 9
+         */
+        basic_matrix<fun_t> F(2);
+        F(0) = [](mat_t const& X)->float_t{ return  std::pow(X(0), 2.0) +    std::pow(X(1), 2.0) - 1; };
+        F(1) = [](mat_t const& X)->float_t{ return 5*std::pow(X(0), 2.0) + 21*std::pow(X(1), 2.0) - 9; };
+        
+
+        basic_matrix<fun_t> J(2, 2);
+        J(0,0) = [](mat_t const& X)->float_t{ return  2 * X(0); };
+        J(1,0) = [](mat_t const& X)->float_t{ return 10 * X(0); };
+        J(0,1) = [](mat_t const& X)->float_t{ return 2 * X(1); };
+        J(1,1) = [](mat_t const& X)->float_t{ return 42 * X(1); };
+
 
         auto X{X0};
 
@@ -383,8 +445,8 @@ void test1(){
         };
         auto J_aux{ make_aux(J) };
         auto F_aux{ make_aux(F) };
-        auto sret = solve_simultaneous_iteration( X, F_aux );
-        PRINT_M(sret);
+        auto nret = newton_method_solve( X, F_aux, J_aux );
+        PRINT_M(nret);
 
 }
 
@@ -396,4 +458,5 @@ void test1(){
 int main(){
         using namespace numerics;
         test1();
+        test2();
 }
