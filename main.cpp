@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <functional>
 #include <cassert>
 
 #include <boost/lexical_cast.hpp>
@@ -10,10 +11,18 @@
 #define PRINT(X) PRINT_SEQ((X))
 #define PRINT_M(M) do{ std::cout << #M " = \n"; std::cout << M; }while(0)
 
+namespace numerics{
+
+static const int infinity = -1;
+
+using float_t = long double;
+
 template<class T>
 struct basic_matrix{
         using value_type = T;
         enum identity_e{ identity };
+        basic_matrix(basic_matrix const&)=default;
+        basic_matrix& operator=(basic_matrix const&)=default;
         explicit basic_matrix(size_t height = 2, size_t width = 1):
                 height_{height},
                 width_{width}, 
@@ -162,6 +171,45 @@ struct basic_matrix{
                 }
                 return ret;
         }
+        basic_matrix<T>& operator-=(basic_matrix<T> const& that){
+                assert( width() == that.width() && "precondtion failed");
+                assert( height() == that.height() && "precondtion failed");
+                for(size_t i{0};i!=height();++i){
+                        for(size_t j{0};j!=width();++j){
+                                (*this)(i,j) -= that(i,j);
+                        }
+                }
+                return *this;
+        }
+        friend
+        basic_matrix<T> operator-(basic_matrix<T> left, basic_matrix<T> const& right){
+                left -= right;
+                return std::move(left);
+        }
+        bool is_vector()const{
+                return width() == 1;
+        }
+        template<int P>
+        T norm()const{
+                using std::pow;
+                if( is_vector() ){
+                        if( P == infinity ){
+                                return std::fabs(*std::max_element( data_.begin(), data_.end(), [](auto const& l, auto const& r){
+                                        return std::fabs(l) < std::fabs(r);
+                                }));
+                        } else {
+                                T ret = T();
+                                for(size_t i{0};i!=height();++i){
+                                        ret += pow( std::fabs((*this)(i,0)), static_cast<T>(P) );
+                                }
+                                ret = pow( ret, 1 / static_cast<T>(P) );
+                                return ret;
+                        }
+                } else{
+                        // not implemented
+                        return -1;
+                }
+        }
 private:
         size_t height_;
         size_t width_;
@@ -244,14 +292,14 @@ Matrix_Type linear_solve(Matrix_Type const& A, Matrix_Type const& B){
 }
 
 void test0(){
-        basic_matrix<long double> A(3,3);
-        basic_matrix<long double> I(3,3, basic_matrix<long double>::identity );
-        basic_matrix<long double> I2(I);
+        basic_matrix<float_t> A(3,3);
+        basic_matrix<float_t> I(3,3, basic_matrix<float_t>::identity );
+        basic_matrix<float_t> I2(I);
         I2(0,0) = 0;
         I2(1,1) = 0;
         I2(0,1) = 1;
         I2(1,0) = 1;
-        basic_matrix<long double> B(3,1);
+        basic_matrix<float_t> B(3,1);
         A(0,0) = 1;
         A(0,1) = 1;
         A(0,2) = 1;
@@ -274,7 +322,78 @@ void test0(){
         PRINT( A* x );
 }
 
+template<class X_t, class F_t, class J_t>
+void newton_method_solve(X_t& x, F_t const& F, J_t const& J){
+        /*
+                x_{n+1} = x_{n} - J(x_n)^-1 * F(x)
+         */
+}
+
+template<class X_t, class G_t>
+auto solve_simultaneous_iteration(X_t& x0, G_t const& G){
+        /*
+                x_{n+1} = F(x_n)
+         */
+        X_t x{x0};
+        for(;;){
+                X_t next{G(x)};
+                auto d( x - next);
+                x = next;
+                auto norm{ d.template norm<infinity>() };
+                if( norm < 1e-15){
+                        break;
+                }
+        }
+        return std::move(x);
+}
+
+void test1(){
+
+        using mat_t = basic_matrix<float_t>;
+        using fun_t = std::function<float_t(mat_t const&)>;
+
+
+        basic_matrix<fun_t> F(2);
+        F(0) = [](mat_t const& X)->float_t{ return std::pow( 1-std::pow(X(1),2.0), .5); };
+        F(1) = [](mat_t const& X)->float_t{ return 1.0 / std::sqrt(21.0) * std::pow(9.0 - 5.0 * std::pow(X(0),2.0), .5); };
+
+        basic_matrix<fun_t> J(2, 2);
+        J(0,0) = [](mat_t const& X)->float_t{ return 0; };
+        J(1,0) = [](mat_t const& X)->float_t{ return -5/std::sqrt(12) * X(0) * std::pow(9 - 5 * std::pow(X(1),2.0), -0.5); };
+        J(0,1) = [](mat_t const& X)->float_t{ return -X(1) * std::pow(1 - std::pow(X(2),2), -.5); };
+        J(1,1) = [](mat_t const& X)->float_t{ return 0; };
+
+        basic_matrix<float_t> X0(2);
+        X0(0) = .5;
+        X0(1) = .3;
+
+        auto X{X0};
+
+        auto make_aux = [&](auto const& M){
+                return [&](auto const& X)->mat_t{
+                        mat_t ret{ M.height(), M.width() };
+                        for(size_t i{0};i!=M.height();++i){
+                                for(size_t j{0};j!=M.width();++j){
+                                        ret(i,j) = M(i,j)(X);
+                                }
+                        }
+                        return std::move(ret);
+                };
+
+        };
+        auto J_aux{ make_aux(J) };
+        auto F_aux{ make_aux(F) };
+        auto sret = solve_simultaneous_iteration( X, F_aux );
+        PRINT_M(sret);
+
+}
+
+} // numerics
+
+
+
 
 int main(){
-        test0();
+        using namespace numerics;
+        test1();
 }
